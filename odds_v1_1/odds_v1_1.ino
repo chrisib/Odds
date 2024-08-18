@@ -114,7 +114,6 @@ int cvInputLookup[61] = {0, 13, 30, 47, 64, 81, 97, 115, 131, 149, 165, 182,
                         };
 
 void setup() {
-
   //Blink the internal LED four times to confirm that firmware upload went well.
   pinMode(PIN_INTERNAL_LED, OUTPUT);
   delay(500);
@@ -202,8 +201,7 @@ void setup() {
 
 }
 
-void loop() {
-
+void read_inputs() {
   // Update all digital inputs.
   trig = digitalRead(PIN_TRIG);
   loopSwitch = digitalRead(PIN_LOOP_SWITCH);
@@ -222,222 +220,227 @@ void loop() {
   rawScale = analogRead(PIN_SCALE);
   rawLoop = analogRead(PIN_LOOP);
   rawCV = analogRead(PIN_CV_IN);
+}
 
-  // Check if calibration mode is active.
-  if(calibrationMode){
+void loop_calibration() {
+  // Check if probability potentiometer is being changed.
+  if(rawProb < prevRawProb - hysteresis || rawProb >= prevRawProb + hysteresis){
 
-    // Check if probability potentiometer is being changed.
+    // Set the octave parameter according to the potentiometer.
+    octave = potScaling(rawProb);
+
+    // Check if there's a change in value of the potentiometer.
+    if(octave != prevOctave){
+      
+      // Set the CV output to octaves (1V/Oct) according to the potentiometer, for easy calibration of the OFFSET and GAIN trimmers on PCB.
+      // Also trigger the gate out every time a new octave is detected from the potentiometer.
+      digitalWrite(PIN_GATE, HIGH);
+      
+      pinMode(PIN_CV, OUTPUT);
+      
+      TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
+      TCCR2B = _BV(WGM22) | _BV(CS20);
+      OCR2A = PWM_SCALING;
+      OCR2B = 0;
+      OCR2B = (octave*12 & PWM_BITMASK) * PWM_FACTOR;
+      prevOctave = octave;
+    }
+    prevRawProb = rawProb;
+  }
+  else{
+    
+    //In the case of no new octave values, turn off the gate output.
+    digitalWrite(PIN_GATE, LOW);
+  }
+}
+
+void loop_normal() {
+  // Check if there's a new trig on the trig input.
+  if(trig && !trigFlag){
+    trigFlag = 1;
+
+    // Check if the main counter is higher than the current loop length, if so reset counter to zero.
+    if(ctr > loopLength){
+      ctr = 0;
+    }
+
+    // Main state machine, checks if LOOP switch is on or off.
+    if (loopSwitch) {
+      play_old_notes();
+    }
+    else {
+      generate_new_notes();
+    }
+    
+    // Increment the main counter.
+    ctr++;
+  }
+  
+  // If there's not a trig on the trig input, update all potentiometers and set the appropriate values.
+  // This is done here to prioritize timing and snappiness of the sequencer trigging.
+  else if(!trig && trigFlag){
+    trigFlag = 0;
+    // If there's not trig on the trig input, set the gate output to low.
+    digitalWrite(PIN_GATE, LOW);
+
+    // Check if there are movement on the probability potentiometer. Set Probability if there is, OR set Octave if SHIFT is held.
     if(rawProb < prevRawProb - hysteresis || rawProb >= prevRawProb + hysteresis){
-
-      // Set the octave parameter according to the potentiometer.
-      octave = potScaling(rawProb);
-
-      // Check if there's a change in value of the potentiometer.
-      if(octave != prevOctave){
-        
-        // Set the CV output to octaves (1V/Oct) according to the potentiometer, for easy calibration of the OFFSET and GAIN trimmers on PCB.
-        // Also trigger the gate out every time a new octave is detected from the potentiometer.
-        digitalWrite(PIN_GATE, HIGH);
-        
-        pinMode(PIN_CV, OUTPUT);
-        
-        TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
-        TCCR2B = _BV(WGM22) | _BV(CS20);
-        OCR2A = PWM_SCALING;
-        OCR2B = 0;
-        OCR2B = (octave*12 & PWM_BITMASK) * PWM_FACTOR;
-        prevOctave = octave;
+      if(shiftState){
+        octave = potScaling(rawProb);
+      }
+      else{
+        probability = map(rawProb, 0, 1023, 0, 100);
       }
       prevRawProb = rawProb;
     }
-    else{
-      
-      //In the case of no new octave values, turn off the gate output.
-      digitalWrite(PIN_GATE, LOW);
-    }
-    
-  }
-  // If calibration mode is not active, proceed to normal mode.
-  else{
 
-    // Check if there's a new trig on the trig input.
-    if(trig && !trigFlag){
-  
-      trigFlag = 1;
-
-      // Check if the main counter is higher than the current loop length, if so reset counter to zero.
-      if(ctr > loopLength){
-        ctr = 0;
+    // Check if there are movement on the scale potentiometer. Set Scale if there is, OR set Chord structure if SHIFT is held.
+    if(rawScale < prevRawScale - hysteresis || rawScale >= prevRawScale + hysteresis){
+      if(shiftState){
+        potScalingChord(rawScale);
       }
+      else{
+        scaleSelect = potScaling(rawScale) * 13;
+        scaleSize = scales[scaleSelect];
+      }
+      prevRawScale = rawScale;
+    }
 
-      // Main state machine, checks if LOOP switch is on or off.
-      switch(loopSwitch){
+    // Check if there are movement on the loop length potentiometer. Set Loop Length if there is, OR set Loop Offset if SHIFT is held.
+    if(rawLoop < prevRawLoop - hysteresis || rawLoop >= prevRawLoop + hysteresis){
+      if(shiftState){
+        offset = map(rawLoop, 0, 1023, 0, 63);
+      }
+      else{
+        loopLength = potScaling13(rawLoop);
+      }
+      prevRawLoop = rawLoop;
+    }
 
-        // If LOOP switch is OFF, generate new random notes.
-        case 0:
+    // Check if there is change on the CV input. Set the CV input variable accordingly if so.
+    if(rawCV < prevRawCV - hysteresis || rawCV >= prevRawCV + hysteresis){ 
 
-          // Check if a random number between 0-100 is smaller than value of probability potentiometer.
-          if(random(101) < probability){
-
-            // If CV input has not changed, generate a random note within the chosen chord structure.
-            if(cvInputChanged == 0){
-              chord = ((random(chordStructure)/100)*chordMultiplier) + cvInput; //Chord structure
-            }
-            // If CV input has just changed, set the root note of the chord in this instance.
-            else{
-              chord = 0 + cvInput; //Chord structure
-              cvInputChanged = 0;
-            }
-            
-            // If CV input is used, this calculation makes sure that the scale is always held within the first octave.
-            scaleOffset = chord - ((chord / scaleSize)*scaleSize);
-
-            // Create note within chosen scale and offset it with chosen octave range (which is also randomly generated within a range.)
-            makeNote = scales[scaleOffset+scaleSelect+1] + 12*(map(random(7),0,6,constrain(octave-2, 0, 4),octave));
-
-            // Make the final note, and constrain it to maximum CV range (0-7 Volts or 0-84 notes)
-            note = constrain(makeNote + ((chord / scaleSize)*12), 0 , 84);
-            
-            // Save the note in loopBuffer and mask off the gate value in the LSB.
-            loopBuffer[(ctr + offset) % 64] = note & PWM_BITMASK;
-
-            // Set the LSB to 1 to store a high gate value.
-            bitWrite(loopBuffer[(ctr + offset) % 64], 7, 1);
-
-            // Set the gate output to HIGH to activate the gate output.
-            digitalWrite(PIN_GATE, HIGH);
-
-            // Configure the CV output.
-            pinMode(PIN_CV, OUTPUT);
-            TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
-            TCCR2B = _BV(WGM22) | _BV(CS20);
-            OCR2A = PWM_SCALING;
-            OCR2B = 0;
-            // Set the CV output to last generated note.
-            OCR2B = (note & PWM_BITMASK) * PWM_FACTOR;
-  
+      // Check the lookup table for the CV input values. This is not linear due to circuitry on the PCB, therefore the need of look up table.
+      for (int i = 0; i <= 60; i++) {
+        // Check for values within a range of +/- 3.
+        if(rawCV > cvInputLookup[i] - 6 && rawCV < cvInputLookup[i] + 6){
+          // If the scale size is 7, move the F key up one key to compensate for the uneven math. This makes it possible to use only white keys when transposing.
+          if(scaleSize == 7 && (i == 5 || i == 17 || i == 29 || i == 41 || i == 53)){
+            i++; 
           }
-          else{
-            // If no note was generated, save the last generated note value to loopBuffer and set the gate output to low.
-            loopBuffer[ctr + offset] = note & PWM_BITMASK;
-            bitWrite(loopBuffer[(ctr + offset) % 64], 7, 0);
-          }
+          // Scale the CV input value to the size of the scale. This makes sure that octaves are always at whole Volts.
+          cvInput = i * scaleSize / 12;
 
-          // Case detection.
-          lastCase = 0;
-          break;
-
-        // If LOOP switch is ON, enter looping mode!
-        case 1:
-
-          // Check if LOOP switch just was just pressed.
-          if(lastCase == 0){
-
-            // Turn off the gate output to avoid wrong notes being played back.
-            digitalWrite(PIN_GATE, bitRead(0, 7));
-
-            // Save the loop buffer to EEPROM in order to retrieve it at next power on. This only saves the length of loop length value.
-            for (int i = offset; i <= loopLength + offset; i++) {
-              
-              EEPROM.write(i % 64, loopBuffer[i % 64]);
-            }
-
-            // Case detection.
-            lastCase = 1;
-          }
-          else{
-
-            // Read the stored seqeunce off the EEPROM and set GATE and CV outputs accordingly.
-            digitalWrite(PIN_GATE, bitRead(EEPROM.read((ctr + offset) % 64), 7));
-            pinMode(PIN_CV, OUTPUT);
-              
-            TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
-            TCCR2B = _BV(WGM22) | _BV(CS20);
-            OCR2A = PWM_SCALING;
-            OCR2B = 0;
-            OCR2B = (EEPROM.read(((ctr + offset) % 64) & PWM_BITMASK) * PWM_FACTOR);
-          }
+          // Flag that CV input has been changed, next note should be root note so it is easier to hear which chord is being played.
+          cvInputChanged = 1;
           
           break;
+        }
       }
-
-      // Increment the main counter.
-      ctr++;
+      prevRawCV = rawCV;
     }
-    
-    // If there's not a trig on the trig input, update all potentiometers and set the appropriate values.
-    // This is done here to prioritize timing and snappiness of the sequencer trigging.
-    else if(!trig && trigFlag){
-      trigFlag = 0;
-      // If there's not trig on the trig input, set the gate output to low.
-      digitalWrite(PIN_GATE, LOW);
+  }
+}
 
-      // Check if there are movement on the probability potentiometer. Set Probability if there is, OR set Octave if SHIFT is held.
-      if(rawProb < prevRawProb - hysteresis || rawProb >= prevRawProb + hysteresis){
-        if(shiftState){
-          octave = potScaling(rawProb);
-        }
-        else{
-          probability = map(rawProb, 0, 1023, 0, 100);
-        }
-        prevRawProb = rawProb;
-      }
+void loop() {
+  read_inputs();
 
-      // Check if there are movement on the scale potentiometer. Set Scale if there is, OR set Chord structure if SHIFT is held.
-      if(rawScale < prevRawScale - hysteresis || rawScale >= prevRawScale + hysteresis){
-        if(shiftState){
-          potScalingChord(rawScale);
-        }
-        else{
-          scaleSelect = potScaling(rawScale) * 13;
-          scaleSize = scales[scaleSelect];
-        }
-        prevRawScale = rawScale;
-      }
-
-      // Check if there are movement on the loop length potentiometer. Set Loop Length if there is, OR set Loop Offset if SHIFT is held.
-      if(rawLoop < prevRawLoop - hysteresis || rawLoop >= prevRawLoop + hysteresis){
-        if(shiftState){
-          offset = map(rawLoop, 0, 1023, 0, 63);
-        }
-        else{
-          loopLength = potScaling13(rawLoop);
-        }
-        prevRawLoop = rawLoop;
-      }
-
-      // Check if there is change on the CV input. Set the CV input variable accordingly if so.
-      if(rawCV < prevRawCV - hysteresis || rawCV >= prevRawCV + hysteresis){ 
-
-        // Check the lookup table for the CV input values. This is not linear due to circuitry on the PCB, therefore the need of look up table.
-        for (int i = 0; i <= 60; i++) {
-          // Check for values within a range of +/- 3.
-          if(rawCV > cvInputLookup[i] - 6 && rawCV < cvInputLookup[i] + 6){
-            // If the scale size is 7, move the F key up one key to compensate for the uneven math. This makes it possible to use only white keys when transposing.
-            if(scaleSize == 7 && (i == 5 || i == 17 || i == 29 || i == 41 || i == 53)){
-              i++; 
-            }
-            // Scale the CV input value to the size of the scale. This makes sure that octaves are always at whole Volts.
-            cvInput = i * scaleSize / 12;
-
-            // Flag that CV input has been changed, next note should be root note so it is easier to hear which chord is being played.
-            cvInputChanged = 1;
-            
-            break;
-          }
-        }
-        prevRawCV = rawCV;
-      }
-    }
+  // Check if calibration mode is active.
+  // Run the appropriate worker function
+  if(calibrationMode){
+    loop_calibration();
+  }
+  else{
+    loop_normal(); 
   }
   
   delay(1);
+}
 
+void generate_new_notes() {
+  // Check if a random number between 0-100 is smaller than value of probability potentiometer.
+  if(random(101) < probability){
+
+    // If CV input has not changed, generate a random note within the chosen chord structure.
+    if(cvInputChanged == 0){
+      chord = ((random(chordStructure)/100)*chordMultiplier) + cvInput; //Chord structure
+    }
+    // If CV input has just changed, set the root note of the chord in this instance.
+    else{
+      chord = 0 + cvInput; //Chord structure
+      cvInputChanged = 0;
+    }
+    
+    // If CV input is used, this calculation makes sure that the scale is always held within the first octave.
+    scaleOffset = chord - ((chord / scaleSize)*scaleSize);
+
+    // Create note within chosen scale and offset it with chosen octave range (which is also randomly generated within a range.)
+    makeNote = scales[scaleOffset+scaleSelect+1] + 12*(map(random(7),0,6,constrain(octave-2, 0, 4),octave));
+
+    // Make the final note, and constrain it to maximum CV range (0-7 Volts or 0-84 notes)
+    note = constrain(makeNote + ((chord / scaleSize)*12), 0 , 84);
+    
+    // Save the note in loopBuffer and mask off the gate value in the LSB.
+    loopBuffer[(ctr + offset) % 64] = note & PWM_BITMASK;
+
+    // Set the LSB to 1 to store a high gate value.
+    bitWrite(loopBuffer[(ctr + offset) % 64], 7, 1);
+
+    // Set the gate output to HIGH to activate the gate output.
+    digitalWrite(PIN_GATE, HIGH);
+
+    // Configure the CV output.
+    pinMode(PIN_CV, OUTPUT);
+    TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
+    TCCR2B = _BV(WGM22) | _BV(CS20);
+    OCR2A = PWM_SCALING;
+    OCR2B = 0;
+    // Set the CV output to last generated note.
+    OCR2B = (note & PWM_BITMASK) * PWM_FACTOR;
+
+  }
+  else{
+    // If no note was generated, save the last generated note value to loopBuffer and set the gate output to low.
+    loopBuffer[ctr + offset] = note & PWM_BITMASK;
+    bitWrite(loopBuffer[(ctr + offset) % 64], 7, 0);
+  }
+
+  // Case detection.
+  lastCase = 0;
+}
+
+void play_old_notes() {
+  // Check if LOOP switch just was just pressed.
+  if(lastCase == 0){
+
+    // Turn off the gate output to avoid wrong notes being played back.
+    digitalWrite(PIN_GATE, bitRead(0, 7));
+
+    // Save the loop buffer to EEPROM in order to retrieve it at next power on. This only saves the length of loop length value.
+    for (int i = offset; i <= loopLength + offset; i++) {
+      
+      EEPROM.write(i % 64, loopBuffer[i % 64]);
+    }
+
+    // Case detection.
+    lastCase = 1;
+  }
+  else{
+
+    // Read the stored seqeunce off the EEPROM and set GATE and CV outputs accordingly.
+    digitalWrite(PIN_GATE, bitRead(EEPROM.read((ctr + offset) % 64), 7));
+    pinMode(PIN_CV, OUTPUT);
+      
+    TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
+    TCCR2B = _BV(WGM22) | _BV(CS20);
+    OCR2A = PWM_SCALING;
+    OCR2B = 0;
+    OCR2B = (EEPROM.read(((ctr + offset) % 64) & PWM_BITMASK) * PWM_FACTOR);
+  }
 }
 
 // Function for scaling potentiometers to panel graphics.
 int potScaling(int input){
-
   int result;
 
   if(input < 10){
@@ -467,7 +470,6 @@ int potScaling(int input){
 
 // Function for scaling potentiometers to panel graphics.
 void potScalingChord(int input){
-
   int result;
 
   if(input < 10){
@@ -503,7 +505,6 @@ void potScalingChord(int input){
 
 // Function for scaling potentiometers to panel graphics.
 int potScaling13(int input){
-
   int result;
 
   if(input < 5){
