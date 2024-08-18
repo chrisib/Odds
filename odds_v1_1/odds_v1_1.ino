@@ -34,10 +34,10 @@ const int PIN_LOOP = A0;
 const int PIN_INTERNAL_LED = 13;
 
 // PWM CV output variables.
-byte bitmask = B01111111;
+const byte PWM_BITMASK = B01111111;
+const int PWM_FACTOR = 2;
+const int PWM_SCALING = 239;
 byte note = 0;
-int factor = 2;
-int scaling = 239;
 
 // Hysteresis variable for stabilizing analog input data.
 int hysteresis = 3;
@@ -148,7 +148,7 @@ void setup() {
   // Setup PWM output to high frequency and correct scaling.
   TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
   TCCR2B = _BV(WGM22) | _BV(CS20);
-  OCR2A = scaling;
+  OCR2A = PWM_SCALING;
   OCR2B = 0;
 
   // Seed the random function with analog input for better random generation.
@@ -243,9 +243,9 @@ void loop() {
         
         TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
         TCCR2B = _BV(WGM22) | _BV(CS20);
-        OCR2A = scaling;
+        OCR2A = PWM_SCALING;
         OCR2B = 0;
-        OCR2B = (octave*12 & bitmask) * factor;
+        OCR2B = (octave*12 & PWM_BITMASK) * PWM_FACTOR;
         prevOctave = octave;
       }
       prevRawProb = rawProb;
@@ -299,7 +299,7 @@ void loop() {
             note = constrain(makeNote + ((chord / scaleSize)*12), 0 , 84);
             
             // Save the note in loopBuffer and mask off the gate value in the LSB.
-            loopBuffer[(ctr + offset) % 64] = note & bitmask;
+            loopBuffer[(ctr + offset) % 64] = note & PWM_BITMASK;
 
             // Set the LSB to 1 to store a high gate value.
             bitWrite(loopBuffer[(ctr + offset) % 64], 7, 1);
@@ -311,15 +311,15 @@ void loop() {
             pinMode(PIN_CV, OUTPUT);
             TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
             TCCR2B = _BV(WGM22) | _BV(CS20);
-            OCR2A = scaling;
+            OCR2A = PWM_SCALING;
             OCR2B = 0;
             // Set the CV output to last generated note.
-            OCR2B = (note & bitmask) * factor;
+            OCR2B = (note & PWM_BITMASK) * PWM_FACTOR;
   
           }
           else{
             // If no note was generated, save the last generated note value to loopBuffer and set the gate output to low.
-            loopBuffer[ctr + offset] = note & bitmask;
+            loopBuffer[ctr + offset] = note & PWM_BITMASK;
             bitWrite(loopBuffer[(ctr + offset) % 64], 7, 0);
           }
 
@@ -353,9 +353,9 @@ void loop() {
               
             TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
             TCCR2B = _BV(WGM22) | _BV(CS20);
-            OCR2A = scaling;
+            OCR2A = PWM_SCALING;
             OCR2B = 0;
-            OCR2B = (EEPROM.read(((ctr + offset) % 64) & bitmask) * factor);
+            OCR2B = (EEPROM.read(((ctr + offset) % 64) & PWM_BITMASK) * PWM_FACTOR);
           }
           
           break;
