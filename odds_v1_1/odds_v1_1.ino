@@ -21,17 +21,17 @@ byte scales[91] = { 7, 0, 2, 4, 5, 7, 9,11, 0, 0, 0, 0, 0, // Major
                   };
 
 // Hardware pin definitions
-int cvPin = 3;
-int resetPin = 4;
-int trigPin = 5;
-int loopSwitchPin = 6;
-int gatePin = 8;   
-int shiftPin = 9;
-int probPin = A3;
-int scalePin = A2;
-int cvInPin = A1;
-int loopPin = A0;
-int internalLED = 13;
+const int PIN_CV = 3;
+const int PIN_RESET = 4;
+const int PIN_TRIG = 5;
+const int PIN_LOOP_SWITCH = 6;
+const int PIN_GATE = 8;
+const int PIN_SHIFT = 9;
+const int PIN_PROB = A3;
+const int PIN_SCALE = A2;
+const int PIN_CV_IN = A1;
+const int PIN_LOOP = A0;
+const int PIN_INTERNAL_LED = 13;
 
 // PWM CV output variables.
 byte bitmask = B01111111;
@@ -116,34 +116,34 @@ int cvInputLookup[61] = {0, 13, 30, 47, 64, 81, 97, 115, 131, 149, 165, 182,
 void setup() {
 
   //Blink the internal LED four times to confirm that firmware upload went well.
+  pinMode(PIN_INTERNAL_LED, OUTPUT);
   delay(500);
-  digitalWrite(internalLED, HIGH);
+  digitalWrite(PIN_INTERNAL_LED, HIGH);
   delay(100);
-  digitalWrite(internalLED, LOW);
+  digitalWrite(PIN_INTERNAL_LED, LOW);
   delay(200);
-  digitalWrite(internalLED, HIGH);
+  digitalWrite(PIN_INTERNAL_LED, HIGH);
   delay(100);
-  digitalWrite(internalLED, LOW);
+  digitalWrite(PIN_INTERNAL_LED, LOW);
   delay(200);
-  digitalWrite(internalLED, HIGH);
+  digitalWrite(PIN_INTERNAL_LED, HIGH);
   delay(100);
-  digitalWrite(internalLED, LOW);
+  digitalWrite(PIN_INTERNAL_LED, LOW);
   delay(200);
-  digitalWrite(internalLED, HIGH);
+  digitalWrite(PIN_INTERNAL_LED, HIGH);
   delay(100);
-  digitalWrite(internalLED, LOW);
+  digitalWrite(PIN_INTERNAL_LED, LOW);
 
   // Set up pins at startup.
-  pinMode(internalLED, OUTPUT);
-  pinMode(cvPin, OUTPUT);
-  pinMode(gatePin, OUTPUT);
-  pinMode(trigPin, INPUT);
-  pinMode(probPin, INPUT);
-  pinMode(scalePin, INPUT); 
-  pinMode(loopPin, INPUT);
-  pinMode(cvInPin, INPUT);
-  pinMode(loopSwitchPin, INPUT);
-  pinMode(shiftPin, INPUT_PULLUP);
+  pinMode(PIN_CV, OUTPUT);
+  pinMode(PIN_GATE, OUTPUT);
+  pinMode(PIN_TRIG, INPUT);
+  pinMode(PIN_PROB, INPUT);
+  pinMode(PIN_SCALE, INPUT);
+  pinMode(PIN_LOOP, INPUT);
+  pinMode(PIN_CV_IN, INPUT);
+  pinMode(PIN_LOOP_SWITCH, INPUT);
+  pinMode(PIN_SHIFT, INPUT_PULLUP);
 
   // Setup PWM output to high frequency and correct scaling.
   TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
@@ -154,16 +154,16 @@ void setup() {
   // Seed the random function with analog input for better random generation.
   randomSeed(analogRead(A5));
 
-  // Read the sequence saved in EEPROM into the loopBuffer for instant playback if last saved sequence.
+  // Read the sequence saved in EEPROM into the loopBuffer for instant playback of last saved sequence.
   for (int i = 0; i < 64; i++) {
     loopBuffer[i] = EEPROM.read(i);
   }
 
   // Update all analog inputs.
-  rawProb = analogRead(probPin);
-  rawScale = analogRead(scalePin);
-  rawLoop = analogRead(loopPin); 
-  rawCV = analogRead(cvInPin);
+  rawProb = analogRead(PIN_PROB);
+  rawScale = analogRead(PIN_SCALE);
+  rawLoop = analogRead(PIN_LOOP);
+  rawCV = analogRead(PIN_CV_IN);
 
   // Set the musical scale to what ever the pot is set to.
   scaleSelect = potScaling(rawScale) * 13;
@@ -176,7 +176,7 @@ void setup() {
   probability = map(rawProb, 0, 1023, 0, 100);
 
   // Check if SHIFT switch is pressed at startup, used for calibration mode.
-  rawShiftState = digitalRead(shiftPin);
+  rawShiftState = digitalRead(PIN_SHIFT);
 
   if(rawShiftState != previousShiftState){
     shiftState = rawShiftState;
@@ -191,13 +191,13 @@ void setup() {
     calibrationMode = 1;
 
     // Blink the gate LED twice to indicate that calibration mode is active.
-    digitalWrite(gatePin, HIGH);
+    digitalWrite(PIN_GATE, HIGH);
     delay(50);
-    digitalWrite(gatePin, LOW);
+    digitalWrite(PIN_GATE, LOW);
     delay(250);
-    digitalWrite(gatePin, HIGH);
+    digitalWrite(PIN_GATE, HIGH);
     delay(50);
-    digitalWrite(gatePin, LOW);
+    digitalWrite(PIN_GATE, LOW);
   }
 
 }
@@ -205,9 +205,9 @@ void setup() {
 void loop() {
 
   // Update all digital inputs.
-  trig = digitalRead(trigPin);
-  loopSwitch = digitalRead(loopSwitchPin);
-  rawShiftState = digitalRead(shiftPin);
+  trig = digitalRead(PIN_TRIG);
+  loopSwitch = digitalRead(PIN_LOOP_SWITCH);
+  rawShiftState = digitalRead(PIN_SHIFT);
 
   // Check if SHIFT switch is pressed.
   if(rawShiftState != previousShiftState){
@@ -218,10 +218,10 @@ void loop() {
   }
 
   // Update all analog inputs.
-  rawProb = analogRead(probPin);
-  rawScale = analogRead(scalePin);
-  rawLoop = analogRead(loopPin); 
-  rawCV = analogRead(cvInPin);
+  rawProb = analogRead(PIN_PROB);
+  rawScale = analogRead(PIN_SCALE);
+  rawLoop = analogRead(PIN_LOOP);
+  rawCV = analogRead(PIN_CV_IN);
 
   // Check if calibration mode is active.
   if(calibrationMode){
@@ -237,9 +237,9 @@ void loop() {
         
         // Set the CV output to octaves (1V/Oct) according to the potentiometer, for easy calibration of the OFFSET and GAIN trimmers on PCB.
         // Also trigger the gate out every time a new octave is detected from the potentiometer.
-        digitalWrite(gatePin, HIGH);
+        digitalWrite(PIN_GATE, HIGH);
         
-        pinMode(cvPin, OUTPUT);
+        pinMode(PIN_CV, OUTPUT);
         
         TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
         TCCR2B = _BV(WGM22) | _BV(CS20);
@@ -253,7 +253,7 @@ void loop() {
     else{
       
       //In the case of no new octave values, turn off the gate output.
-      digitalWrite(gatePin, LOW); 
+      digitalWrite(PIN_GATE, LOW);
     }
     
   }
@@ -305,10 +305,10 @@ void loop() {
             bitWrite(loopBuffer[(ctr + offset) % 64], 7, 1);
 
             // Set the gate output to HIGH to activate the gate output.
-            digitalWrite(gatePin, HIGH);
+            digitalWrite(PIN_GATE, HIGH);
 
             // Configure the CV output.
-            pinMode(cvPin, OUTPUT);
+            pinMode(PIN_CV, OUTPUT);
             TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
             TCCR2B = _BV(WGM22) | _BV(CS20);
             OCR2A = scaling;
@@ -334,7 +334,7 @@ void loop() {
           if(lastCase == 0){
 
             // Turn off the gate output to avoid wrong notes being played back.
-            digitalWrite(gatePin, bitRead(0, 7));
+            digitalWrite(PIN_GATE, bitRead(0, 7));
 
             // Save the loop buffer to EEPROM in order to retrieve it at next power on. This only saves the length of loop length value.
             for (int i = offset; i <= loopLength + offset; i++) {
@@ -348,8 +348,8 @@ void loop() {
           else{
 
             // Read the stored seqeunce off the EEPROM and set GATE and CV outputs accordingly.
-            digitalWrite(gatePin, bitRead(EEPROM.read((ctr + offset) % 64), 7));
-            pinMode(cvPin, OUTPUT);  
+            digitalWrite(PIN_GATE, bitRead(EEPROM.read((ctr + offset) % 64), 7));
+            pinMode(PIN_CV, OUTPUT);
               
             TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);
             TCCR2B = _BV(WGM22) | _BV(CS20);
@@ -370,7 +370,7 @@ void loop() {
     else if(!trig && trigFlag){
       trigFlag = 0;
       // If there's not trig on the trig input, set the gate output to low.
-      digitalWrite(gatePin, LOW);
+      digitalWrite(PIN_GATE, LOW);
 
       // Check if there are movement on the probability potentiometer. Set Probability if there is, OR set Octave if SHIFT is held.
       if(rawProb < prevRawProb - hysteresis || rawProb >= prevRawProb + hysteresis){
